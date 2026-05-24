@@ -20,15 +20,6 @@ jobs:
             artifact_name: DrCOM-JLU-Linux-x64.tar.gz
             is_linux: true
 
-          # Linux ARM64
-          - os: ubuntu-latest
-            qt_arch: gcc_64
-            platform_name: Linux-ARM64
-            arch_label: aarch64
-            build_dir: build-linux-arm64
-            artifact_name: DrCOM-JLU-Linux-ARM64.tar.gz
-            is_linux: true
-
           # Windows MinGW
           - os: windows-latest
             qt_arch: win64_mingw
@@ -50,16 +41,6 @@ jobs:
             artifact_name: DrCOM-JLU-Windows-MSVC.zip
             is_windows: true
             deploy_dir: deploy-windows-msvc
-
-          # macOS Intel
-          - os: macos-13
-            qt_arch: clang_64
-            mac_arch: x86_64
-            platform_name: macOS-Intel
-            arch_label: x86_64
-            build_dir: build-macos-intel
-            artifact_name: DrCOM-JLU-macOS-Intel.zip
-            is_macos: true
 
           # macOS Apple Silicon
           - os: macos-latest

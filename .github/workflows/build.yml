@@ -11,17 +11,14 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux x86_64
-          - os: ubuntu-latest
+          - os: ubuntu-20.04
             qt_arch: gcc_64
             platform_name: Linux-x64
             arch_label: x86_64
             build_dir: build-linux-x64
-            artifact_name: DrCOM-JLU-Linux-x64.tar.gz
+            artifact_name: DrCOM-JLU-Linux-x86_64.AppImage
             is_linux: true
-            deploy_dir: deploy-linux-x64  # 新增部署目录
 
-          # Windows MinGW
           - os: windows-latest
             qt_arch: win64_mingw
             compiler: mingw
@@ -32,7 +29,6 @@ jobs:
             is_windows: true
             deploy_dir: deploy-windows-mingw
 
-          # Windows MSVC
           - os: windows-latest
             qt_arch: win64_msvc2019_64
             compiler: msvc
@@ -43,7 +39,6 @@ jobs:
             is_windows: true
             deploy_dir: deploy-windows-msvc
 
-          # macOS Apple Silicon
           - os: macos-latest
             qt_arch: clang_64
             mac_arch: arm64
@@ -119,177 +114,53 @@ jobs:
     - name: Verify Build Output
       shell: bash
       run: |
-        echo "=== 验证 ${{ matrix.build_dir }} 目录 ==="
+        echo "=== 验证 ${{matrix.build_dir}} 目录 ==="
         ls -la "${{ matrix.build_dir }}/"
         
         if [ "${{ matrix.is_macos }}" == "true" ]; then
           if [ -d "${{ matrix.build_dir }}/DrCOM_JLU_Qt.app" ]; then
             file "${{ matrix.build_dir }}/DrCOM_JLU_Qt.app/Contents/MacOS/DrCOM_JLU_Qt"
-            echo "✅ 找到 macOS 应用包"
+            echo "找到 macOS 应用包"
           else
-            echo "❌ 未找到 DrCOM_JLU_Qt.app"
+            echo "未找到 DrCOM_JLU_Qt.app"
             exit 1
           fi
         elif [ "${{ matrix.is_linux }}" == "true" ]; then
           if [ -f "${{ matrix.build_dir }}/DrCOM_JLU_Qt" ]; then
             file "${{ matrix.build_dir }}/DrCOM_JLU_Qt"
-            echo "✅ 找到 Linux 可执行文件"
+            echo "找到 Linux 可执行文件"
           else
-            echo "❌ 未找到 DrCOM_JLU_Qt"
+            echo "未找到 DrCOM_JLU_Qt"
             exit 1
           fi
         elif [ "${{ matrix.is_windows }}" == "true" ]; then
-          echo "=== Windows 构建输出详情 ==="
-          echo "构建目录: ${{ matrix.build_dir }}"
+          echo "构建目录: ${{matrix.build_dir}}"
           ls -la "${{ matrix.build_dir }}/"
-          echo "release 子目录:"
-          ls -la "${{ matrix.build_dir }}/release/" 2>/dev/null || echo "无 release 目录"
-          echo "debug 子目录:"
-          ls -la "${{ matrix.build_dir }}/debug/" 2>/dev/null || echo "无 debug 目录"
           
-          # 查找可执行文件
           if [ -f "${{ matrix.build_dir }}/release/DrCOM_JLU_Qt.exe" ]; then
-            echo "✅ 找到 Windows 可执行文件 (在 release 目录)"
+            echo "找到 Windows 可执行文件 (在 release 目录)"
             ls -la "${{ matrix.build_dir }}/release/DrCOM_JLU_Qt.exe"
           elif [ -f "${{ matrix.build_dir }}/debug/DrCOM_JLU_Qt.exe" ]; then
-            echo "⚠️ 找到 Windows 可执行文件 (在 debug 目录，但构建类型为 release)"
+            echo "找到 Windows 可执行文件 (在 debug 目录)"
             ls -la "${{ matrix.build_dir }}/debug/DrCOM_JLU_Qt.exe"
           elif [ -f "${{ matrix.build_dir }}/DrCOM_JLU_Qt.exe" ]; then
-            echo "✅ 找到 Windows 可执行文件"
+            echo "找到 Windows 可执行文件"
             ls -la "${{ matrix.build_dir }}/DrCOM_JLU_Qt.exe"
           else
-            echo "❌ 未找到 DrCOM_JLU_Qt.exe"
-            echo "开始搜索..."
-            find "${{ matrix.build_dir }}" -name "*.exe" -type f
+            echo "未找到 DrCOM_JLU_Qt.exe"
             exit 1
           fi
-        fi
-
-    # 🔥 新增：Linux 依赖部署
-    - name: Deploy Linux Dependencies
-      if: matrix.is_linux
-      shell: bash
-      run: |
-        echo "=== 部署 Linux 依赖 ==="
-        
-        # 创建部署目录结构
-        DEPLOY_DIR="${{ matrix.deploy_dir }}"
-        mkdir -p "$DEPLOY_DIR"
-        
-        # 复制可执行文件
-        if [ -f "${{ matrix.build_dir }}/DrCOM_JLU_Qt" ]; then
-          cp "${{ matrix.build_dir }}/DrCOM_JLU_Qt" "$DEPLOY_DIR/"
-          chmod +x "$DEPLOY_DIR/DrCOM_JLU_Qt"
-          echo "✅ 复制可执行文件到部署目录"
-        else
-          echo "❌ 错误：未找到可执行文件"
-          exit 1
-        fi
-        
-        # 下载 linuxdeployqt
-        echo "下载 linuxdeployqt..."
-        wget -q "https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage"
-        chmod +x linuxdeployqt-continuous-x86_64.AppImage
-        
-        # 创建 .desktop 文件（linuxdeployqt 需要）
-        cat > "$DEPLOY_DIR/DrCOM_JLU_Qt.desktop" << EOF
-        [Desktop Entry]
-        Type=Application
-        Name=DrCOM JLU Qt
-        Comment=DrCOM JLU Client for Qt
-        Exec=DrCOM_JLU_Qt
-        Icon=drcom
-        Terminal=false
-        Categories=Network;
-        EOF
-        
-        # 创建 AppDir 结构（linuxdeployqt 期望的结构）
-        APPDIR="$DEPLOY_DIR/AppDir"
-        mkdir -p "$APPDIR/usr/bin"
-        mkdir -p "$APPDIR/usr/lib"
-        mkdir -p "$APPDIR/usr/share/applications"
-        mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-        
-        # 复制文件到 AppDir
-        cp "$DEPLOY_DIR/DrCOM_JLU_Qt" "$APPDIR/usr/bin/"
-        cp "$DEPLOY_DIR/DrCOM_JLU_Qt.desktop" "$APPDIR/usr/share/applications/"
-        
-        # 设置环境变量
-        export QMAKE=$(which qmake)
-        export PATH="/opt/qt/6.5.3/gcc_64/bin:$PATH"
-        export LD_LIBRARY_PATH="/opt/qt/6.5.3/gcc_64/lib:$LD_LIBRARY_PATH"
-        
-        # 运行 linuxdeployqt 收集依赖
-        echo "运行 linuxdeployqt 收集依赖..."
-        ./linuxdeployqt-continuous-x86_64.AppImage \
-          "$APPDIR/usr/share/applications/DrCOM_JLU_Qt.desktop" \
-          -appimage \
-          -bundle-non-qt-libs \
-          -verbose=2 \
-          -qmake="$QMAKE" \
-          -no-translations
-        
-        # 检查是否成功
-        if [ -f "$APPDIR/AppRun" ]; then
-          echo "✅ linuxdeployqt 执行成功"
-          
-          # 将 AppDir 中的内容复制回部署目录
-          echo "复制依赖库到部署目录..."
-          cp -r "$APPDIR/usr/lib/"* "$DEPLOY_DIR/" 2>/dev/null || true
-          
-          # 清理不需要的文件
-          rm -rf "$APPDIR"
-          rm -f linuxdeployqt-continuous-x86_64.AppImage
-          
-          echo "=== 部署目录内容 ==="
-          ls -la "$DEPLOY_DIR/"
-          echo "=== 依赖库列表 ==="
-          ldd "$DEPLOY_DIR/DrCOM_JLU_Qt" || true
-        else
-          echo "⚠️ linuxdeployqt 可能未生成 AppRun，尝试手动收集依赖"
-          
-          # 手动收集依赖
-          echo "手动收集依赖库..."
-          mkdir -p "$DEPLOY_DIR/lib"
-          
-          # 使用 ldd 找出所有依赖
-          ldd "$DEPLOY_DIR/DrCOM_JLU_Qt" | grep "=> /" | awk '{print $3}' | while read lib; do
-            if [ -f "$lib" ]; then
-              cp -v "$lib" "$DEPLOY_DIR/lib/"
-            fi
-          done
-          
-          # 复制 Qt 插件
-          QT_PLUGINS_PATH="/opt/qt/6.5.3/gcc_64/plugins"
-          if [ -d "$QT_PLUGINS_PATH" ]; then
-            mkdir -p "$DEPLOY_DIR/plugins"
-            cp -r "$QT_PLUGINS_PATH/platforms" "$DEPLOY_DIR/plugins/" 2>/dev/null || true
-            cp -r "$QT_PLUGINS_PATH/imageformats" "$DEPLOY_DIR/plugins/" 2>/dev/null || true
-            cp -r "$QT_PLUGINS_PATH/styles" "$DEPLOY_DIR/plugins/" 2>/dev/null || true
-          fi
-          
-          # 创建启动脚本
-          cat > "$DEPLOY_DIR/run.sh" << 'EOF'
-          #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$SCRIPT_DIR:$LD_LIBRARY_PATH"
-          export QT_PLUGIN_PATH="$SCRIPT_DIR/plugins"
-          exec "$SCRIPT_DIR/DrCOM_JLU_Qt" "$@"
-          EOF
-          chmod +x "$DEPLOY_DIR/run.sh"
         fi
 
     - name: Deploy Windows Dependencies
       if: matrix.is_windows
       shell: bash
       run: |
-        echo "=== 部署 Windows 依赖 ==="
+        echo "部署 Windows 依赖"
         
-        # 创建部署目录
         DEPLOY_DIR="${{ matrix.deploy_dir }}"
         mkdir -p "$DEPLOY_DIR"
         
-        # 查找可执行文件
         EXE_PATH=""
         if [ -f "${{ matrix.build_dir }}/release/DrCOM_JLU_Qt.exe" ]; then
           EXE_PATH="${{ matrix.build_dir }}/release/DrCOM_JLU_Qt.exe"
@@ -305,11 +176,10 @@ jobs:
           echo "找到可执行文件: $EXE_PATH"
           cp "$EXE_PATH" "$DEPLOY_DIR/"
         else
-          echo "❌ 错误：未找到可执行文件"
+          echo "未找到可执行文件"
           exit 1
         fi
         
-        # 运行 windeployqt 收集依赖
         echo "运行 windeployqt..."
         cd "$DEPLOY_DIR"
         
@@ -317,11 +187,8 @@ jobs:
         if [ -n "$EXE_FILE" ]; then
           echo "为 $EXE_FILE 部署依赖..."
           windeployqt --compiler-runtime --no-translations "$EXE_FILE"
-          
-          echo "=== 部署目录内容 ==="
-          ls -la
         else
-          echo "❌ 错误：部署目录中未找到可执行文件"
+          echo "部署目录中未找到可执行文件"
           exit 1
         fi
 
@@ -329,7 +196,7 @@ jobs:
       if: matrix.is_macos
       shell: bash
       run: |
-        echo "=== 部署 macOS 依赖 ==="
+        echo "部署 macOS 依赖"
         
         if [ -d "${{ matrix.build_dir }}/DrCOM_JLU_Qt.app" ]; then
           APP_PATH="${{ matrix.build_dir }}/DrCOM_JLU_Qt.app"
@@ -341,24 +208,85 @@ jobs:
           echo "找到应用包: $APP_PATH"
           macdeployqt "$APP_PATH" -always-overwrite
         else
-          echo "❌ 错误：未找到 .app 文件"
+          echo "未找到 .app 文件"
           exit 1
         fi
 
-    - name: Package Linux
+    - name: Prepare for Linux AppImage Creation
       if: matrix.is_linux
       shell: bash
       run: |
-        echo "=== 打包 Linux 应用 ==="
-        DEPLOY_DIR="${{ matrix.deploy_dir }}"
+        echo "准备 AppImage 创建"
         
-        if [ -f "$DEPLOY_DIR/DrCOM_JLU_Qt" ]; then
-          echo "打包部署目录..."
-          tar czvf "${{ matrix.artifact_name }}" -C "$DEPLOY_DIR" .
-          echo "✅ 打包完成: ${{ matrix.artifact_name }}"
-          echo "文件大小: $(du -h "${{ matrix.artifact_name }}" | cut -f1)"
+        mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/lib
+        mkdir -p AppDir/usr/share/applications
+        
+        cp "${{ matrix.build_dir }}/DrCOM_JLU_Qt" AppDir/usr/bin/
+        chmod +x AppDir/usr/bin/DrCOM_JLU_Qt
+        
+        echo "[Desktop Entry]" > AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
+        echo "Type=Application" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
+        echo "Name=DrCOM JLU Qt" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
+        echo "Comment=DrCOM Client for Jilin University" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
+        echo "Exec=DrCOM_JLU_Qt" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
+        echo "Terminal=false" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
+        echo "Categories=Network;" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
+        
+        echo "#!/bin/bash" > AppDir/AppRun
+        echo 'HERE="$(dirname "$(readlink -f "${0}")")"' >> AppDir/AppRun
+        echo 'cd "$HERE"' >> AppDir/AppRun
+        echo 'exec ./usr/bin/DrCOM_JLU_Qt "$@"' >> AppDir/AppRun
+        chmod +x AppDir/AppRun
+
+    - name: Create Linux AppImage
+      if: matrix.is_linux
+      shell: bash
+      run: |
+        echo "创建 Linux AppImage"
+        
+        wget -c -nv "https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage"
+        chmod a+x linuxdeployqt-continuous-x86_64.AppImage
+        
+        export PATH="/usr/local/Qt/6.5.3/gcc_64/bin:$PATH"
+        export QMAKE="/usr/local/Qt/6.5.3/gcc_64/bin/qmake"
+        
+        echo "运行 linuxdeployqt..."
+        ./linuxdeployqt-continuous-x86_64.AppImage AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop \
+          -qmake=$QMAKE \
+          -verbose=2 \
+          -appimage
+        
+        if [ -f "DrCOM-JLU-Linux-x86_64.AppImage" ]; then
+          echo "AppImage 创建成功"
+          file "DrCOM-JLU-Linux-x86_64.AppImage"
+          chmod +x "DrCOM-JLU-Linux-x86_64.AppImage"
         else
-          echo "❌ 错误：部署目录中未找到可执行文件"
+          echo "AppImage 创建失败，尝试备用方案"
+          
+          wget -c -nv "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod a+x appimagetool-x86_64.AppImage
+          
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir "DrCOM-JLU-Linux-x86_64.AppImage"
+          
+          if [ -f "DrCOM-JLU-Linux-x86_64.AppImage" ]; then
+            echo "通过备用方案创建 AppImage 成功"
+            file "DrCOM-JLU-Linux-x86_64.AppImage"
+            chmod +x "DrCOM-JLU-Linux-x86_64.AppImage"
+          else
+            echo "AppImage 创建失败"
+            exit 1
+          fi
+        fi
+
+    - name: Package Linux AppImage
+      if: matrix.is_linux
+      shell: bash
+      run: |
+        if [ -f "DrCOM-JLU-Linux-x86_64.AppImage" ]; then
+          mv "DrCOM-JLU-Linux-x86_64.AppImage" "${{ matrix.artifact_name }}"
+        else
+          echo "AppImage 文件未找到"
           exit 1
         fi
 
@@ -369,7 +297,7 @@ jobs:
         if [ -d "${{ matrix.deploy_dir }}" ]; then
           7z a "${{ matrix.artifact_name }}" "${{ matrix.deploy_dir }}/*"
         else
-          echo "❌ 错误：部署目录不存在"
+          echo "部署目录不存在"
           exit 1
         fi
 
@@ -386,7 +314,7 @@ jobs:
         if [ -d "$APP_PATH" ]; then
           ditto -c -k --keepParent "$APP_PATH" "${{ matrix.artifact_name }}"
         else
-          echo "❌ 错误：未找到应用包"
+          echo "未找到应用包"
           exit 1
         fi
 
@@ -413,16 +341,12 @@ jobs:
     - name: Determine Release Name
       id: determine-release
       run: |
-        # 如果是打 tag 触发，使用 tag 名
         if [ "${{ github.event_name }}" == "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
           TAG_NAME="${GITHUB_REF#refs/tags/}"
-          echo "Release will be created for tag: $TAG_NAME"
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "release_name=Release $TAG_NAME" >> $GITHUB_OUTPUT
         else
-          # 手动触发或其他情况，使用时间戳
           TIMESTAMP=$(date -u +'%Y.%m.%d-%H%M%S')
-          echo "Manual release, using timestamp: $TIMESTAMP"
           echo "tag_name=manual-$TIMESTAMP" >> $GITHUB_OUTPUT
           echo "release_name=Manual Build $TIMESTAMP" >> $GITHUB_OUTPUT
         fi

@@ -21,7 +21,7 @@ jobs:
 
           # Windows MSVC
           - os: windows-latest
-            qt_arch: win64_msvc2022_64
+            qt_arch: win64_msvc2019_64
             compiler: msvc
             platform_name: Windows-MSVC
 

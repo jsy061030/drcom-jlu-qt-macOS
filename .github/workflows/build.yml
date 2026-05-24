@@ -1,6 +1,9 @@
-name: Qt Cross Platform Build (Win-MinGW/MSVC, macOS-Intel-ARM)
+name: Qt Cross Platform Build & Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -12,30 +15,61 @@ jobs:
           - os: ubuntu-latest
             qt_arch: gcc_64
             platform_name: Linux-x64
+            arch_label: x86_64
+            build_dir: build-linux-x64
+            artifact_name: DrCOM-JLU-Linux-x64.tar.gz
+            is_linux: true
+
+          # Linux ARM64
+          - os: ubuntu-latest
+            qt_arch: gcc_64
+            platform_name: Linux-ARM64
+            arch_label: aarch64
+            build_dir: build-linux-arm64
+            artifact_name: DrCOM-JLU-Linux-ARM64.tar.gz
+            is_linux: true
 
           # Windows MinGW
           - os: windows-latest
             qt_arch: win64_mingw
             compiler: mingw
             platform_name: Windows-MinGW
+            arch_label: x86_64
+            build_dir: build-windows-mingw
+            artifact_name: DrCOM-JLU-Windows-MinGW.zip
+            is_windows: true
+            deploy_dir: deploy-windows-mingw
 
           # Windows MSVC
           - os: windows-latest
             qt_arch: win64_msvc2019_64
             compiler: msvc
             platform_name: Windows-MSVC
+            arch_label: x86_64
+            build_dir: build-windows-msvc
+            artifact_name: DrCOM-JLU-Windows-MSVC.zip
+            is_windows: true
+            deploy_dir: deploy-windows-msvc
 
-          # macOS Intel (明确指定 Intel runner，编译 x86_64 效率更高)
+          # macOS Intel
           - os: macos-13
             qt_arch: clang_64
             mac_arch: x86_64
             platform_name: macOS-Intel
+            arch_label: x86_64
+            build_dir: build-macos-intel
+            artifact_name: DrCOM-JLU-macOS-Intel.zip
+            is_macos: true
 
-          # macOS Apple Silicon (当前最新 ARM runner)
+          # macOS Apple Silicon
           - os: macos-latest
             qt_arch: clang_64
             mac_arch: arm64
             platform_name: macOS-AppleSilicon
+            arch_label: arm64
+            build_dir: build-macos-arm64
+            artifact_name: DrCOM-JLU-macOS-AppleSilicon.zip
+            is_macos: true
 
     runs-on: ${{ matrix.os }}
 
@@ -48,9 +82,9 @@ jobs:
       with:
         version: '6.5.3'
         arch: ${{ matrix.qt_arch }}
-        host: ${{ matrix.os == 'macos-13' && 'mac' || matrix.os == 'macos-latest' && 'mac' || matrix.os == 'windows-latest' && 'windows' || 'linux' }}
+        host: ${{ matrix.is_macos && 'mac' || matrix.is_windows && 'windows' || 'linux' }}
+        cache: true
 
-    # Windows MinGW 需要安装 MSYS2
     - name: Setup MSYS2 for MinGW
       if: matrix.compiler == 'mingw'
       uses: msys2/setup-msys2@v2
@@ -63,58 +97,238 @@ jobs:
       if: matrix.compiler == 'msvc'
       uses: ilammy/msvc-dev-cmd@v1
 
-    - name: Configure (qmake)
+    - name: Create Build Directory
       shell: bash
       run: |
+        mkdir -p "${{ matrix.build_dir }}"
+
+    - name: Configure (qmake)
+      shell: bash
+      working-directory: ${{ matrix.build_dir }}
+      run: |
         if [ -n "${{ matrix.mac_arch }}" ]; then
-          # 修复：添加引号确保多架构时也能正确解析
-          qmake DrCOM_JLU_Qt.pro CONFIG+=release "QMAKE_APPLE_DEVICE_ARCHS=${{ matrix.mac_arch }}"
+          qmake ../DrCOM_JLU_Qt.pro CONFIG+=release "QMAKE_APPLE_DEVICE_ARCHS=${{ matrix.mac_arch }}"
         else
-          qmake DrCOM_JLU_Qt.pro CONFIG+=release
+          qmake ../DrCOM_JLU_Qt.pro CONFIG+=release
         fi
 
     - name: Build
       shell: bash
+      working-directory: ${{ matrix.build_dir }}
       run: |
         if [ "${{ matrix.compiler }}" == "msvc" ]; then
           nmake
         elif [ "${{ runner.os }}" == "Windows" ] && [ "${{ matrix.compiler }}" == "mingw" ]; then
-          # 在 MSYS2 环境中使用 mingw32-make
           mingw32-make -j$(nproc)
         else
           make -j$(nproc)
         fi
 
-    # ---------- 打包步骤 ----------
-    - name: Package Windows
-      if: runner.os == 'Windows'
+    # 🔥 新增：Windows 依赖部署
+    - name: Deploy Windows Dependencies
+      if: matrix.is_windows
       shell: bash
       run: |
-        7z a DrCOM-JLU-${{ matrix.platform_name }}.zip release/*.exe
+        echo "=== 部署 Windows 依赖 ==="
+        
+        # 创建部署目录
+        DEPLOY_DIR="${{ matrix.deploy_dir }}"
+        mkdir -p "$DEPLOY_DIR"
+        
+        # 复制可执行文件
+        if [ "${{ matrix.compiler }}" == "msvc" ]; then
+          EXE_PATH="${{ matrix.build_dir }}/release/DrCOM_JLU_Qt.exe"
+        else
+          EXE_PATH="${{ matrix.build_dir }}/DrCOM_JLU_Qt.exe"
+        fi
+        
+        if [ -f "$EXE_PATH" ]; then
+          cp "$EXE_PATH" "$DEPLOY_DIR/"
+        else
+          # 尝试其他可能的位置
+          find "${{ matrix.build_dir }}" -name "*.exe" -exec cp {} "$DEPLOY_DIR/" \;
+        fi
+        
+        # 运行 windeployqt 收集依赖
+        echo "运行 windeployqt..."
+        
+        # 设置 MSVC 环境变量（如果使用 MSVC）
+        if [ "${{ matrix.compiler }}" == "msvc" ]; then
+          # 设置 VCINSTALLDIR 让 windeployqt 能找到运行时库
+          export VCINSTALLDIR="C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC"
+          if [ ! -d "$VCINSTALLDIR" ]; then
+            export VCINSTALLDIR="C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC"
+          fi
+          echo "VCINSTALLDIR: $VCINSTALLDIR"
+        fi
+        
+        # 切换到部署目录执行 windeployqt
+        cd "$DEPLOY_DIR"
+        
+        # 查找可执行文件
+        EXE_FILE=$(find . -name "*.exe" -type f | head -1)
+        if [ -n "$EXE_FILE" ]; then
+          echo "为 $EXE_FILE 部署依赖..."
+          windeployqt --compiler-runtime --no-translations --no-system-d3d-compiler "$EXE_FILE"
+          
+          # 验证部署结果
+          echo "=== 部署目录内容 ==="
+          ls -la
+          echo ""
+          echo "=== 依赖 DLL 列表 ==="
+          find . -name "*.dll" -type f
+        else
+          echo "❌ 错误：未找到可执行文件"
+          exit 1
+        fi
 
-    - name: Package macOS
-      if: runner.os == 'macOS' || runner.os == 'macos'
+    # 🔥 新增：macOS 依赖部署（优化版）
+    - name: Deploy macOS Dependencies
+      if: matrix.is_macos
+      shell: bash
       run: |
-        # 验证二进制架构
-        file release/DrCOM_JLU_Qt.app/Contents/MacOS/DrCOM_JLU_Qt
+        echo "=== 部署 macOS 依赖 ==="
         
-        # 处理依赖
-        macdeployqt release/DrCOM_JLU_Qt.app -always-overwrite
+        # 查找应用包
+        if [ -d "${{ matrix.build_dir }}/DrCOM_JLU_Qt.app" ]; then
+          APP_PATH="${{ matrix.build_dir }}/DrCOM_JLU_Qt.app"
+        else
+          # 尝试在 release 目录查找
+          APP_PATH=$(find "${{ matrix.build_dir }}" -name "*.app" -type d | head -1)
+        fi
         
-        # 打包
-        ditto -c -k --keepParent release/DrCOM_JLU_Qt.app DrCOM-JLU-${{ matrix.platform_name }}.zip
+        if [ -d "$APP_PATH" ]; then
+          echo "找到应用包: $APP_PATH"
+          
+          # 运行 macdeployqt
+          echo "运行 macdeployqt..."
+          macdeployqt "$APP_PATH" -always-overwrite -verbose=1
+          
+          # 验证部署
+          echo "=== 应用包结构 ==="
+          find "$APP_PATH" -name "*.dylib" -o -name "*.framework" | head -20
+          
+          # 检查可执行文件架构
+          echo "=== 二进制架构 ==="
+          file "$APP_PATH/Contents/MacOS/DrCOM_JLU_Qt"
+        else
+          echo "❌ 错误：未找到 .app 文件"
+          find "${{ matrix.build_dir }}" -type f -name "*" | head -20
+          exit 1
+        fi
+
+    # 🔥 新增：Linux 依赖检查（可选）
+    - name: Check Linux Dependencies
+      if: matrix.is_linux
+      shell: bash
+      run: |
+        echo "=== 检查 Linux 依赖 ==="
+        
+        # 查找可执行文件
+        if [ -f "${{ matrix.build_dir }}/DrCOM_JLU_Qt" ]; then
+          EXE_PATH="${{ matrix.build_dir }}/DrCOM_JLU_Qt"
+        else
+          EXE_PATH=$(find "${{ matrix.build_dir }}" -name "DrCOM_JLU_Qt" -type f | head -1)
+        fi
+        
+        if [ -f "$EXE_PATH" ]; then
+          echo "检查动态链接库依赖..."
+          ldd "$EXE_PATH" || true
+          
+          echo "=== 文件信息 ==="
+          file "$EXE_PATH"
+        else
+          echo "⚠️ 警告：未找到可执行文件"
+        fi
 
     - name: Package Linux
-      if: runner.os == 'Linux'
+      if: matrix.is_linux
+      shell: bash
       run: |
-        # 验证是否为 x86_64
-        file release/DrCOM_JLU_Qt
-        tar czvf DrCOM-JLU-Linux.tar.gz -C release .
+        echo "开始打包 Linux 版本..."
+        
+        # 查找可执行文件
+        if [ -f "${{ matrix.build_dir }}/DrCOM_JLU_Qt" ]; then
+          EXE_PATH="${{ matrix.build_dir }}/DrCOM_JLU_Qt"
+        else
+          EXE_PATH=$(find "${{ matrix.build_dir }}" -name "DrCOM_JLU_Qt" -type f | head -1)
+        fi
+        
+        if [ -f "$EXE_PATH" ]; then
+          tar czvf "${{ matrix.artifact_name }}" -C "$(dirname "$EXE_PATH")" "$(basename "$EXE_PATH")"
+          echo "✅ Linux 打包完成: ${{ matrix.artifact_name }}"
+        else
+          echo "❌ 错误：未找到可执行文件"
+          exit 1
+        fi
 
-    - name: Upload Artifacts
+    - name: Package Windows
+      if: matrix.is_windows
+      shell: bash
+      run: |
+        echo "开始打包 Windows 版本..."
+        
+        # 使用部署目录（包含所有依赖）
+        if [ -d "${{ matrix.deploy_dir }}" ]; then
+          7z a "${{ matrix.artifact_name }}" "${{ matrix.deploy_dir }}/*"
+          echo "✅ Windows 打包完成: ${{ matrix.artifact_name }}"
+          echo "=== 打包内容 ==="
+          7z l "${{ matrix.artifact_name }}" | head -20
+        else
+          echo "❌ 错误：部署目录不存在"
+          exit 1
+        fi
+
+    - name: Package macOS
+      if: matrix.is_macos
+      shell: bash
+      run: |
+        echo "开始打包 macOS 版本..."
+        
+        # 查找应用包
+        if [ -d "${{ matrix.build_dir }}/DrCOM_JLU_Qt.app" ]; then
+          APP_PATH="${{ matrix.build_dir }}/DrCOM_JLU_Qt.app"
+        else
+          APP_PATH=$(find "${{ matrix.build_dir }}" -name "*.app" -type d | head -1)
+        fi
+        
+        if [ -d "$APP_PATH" ]; then
+          ditto -c -k --keepParent "$APP_PATH" "${{ matrix.artifact_name }}"
+          echo "✅ macOS 打包完成: ${{ matrix.artifact_name }}"
+        else
+          echo "❌ 错误：未找到应用包"
+          exit 1
+        fi
+
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DrCOM-JLU-${{ matrix.platform_name }}
-        path: |
-          *.zip
-          *.tar.gz
+        name: ${{ matrix.artifact_name }}
+        path: ${{ matrix.artifact_name }}
+        retention-days: 1
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        files: |
+          ./artifacts/**/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

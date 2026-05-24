@@ -111,34 +111,28 @@ jobs:
       working-directory: ${{ matrix.build_dir }}
       run: |
         if [ -n "${{ matrix.mac_arch }}" ]; then
-          qmake ../DrCOM_JLU_Qt.pro CONFIG+=release "QMAKE_APPLE_DEVICE_ARCHS=${{ matrix.mac_arch }}"
+          qmake ../DrCOM_JLU_Qt.pro CONFIG-=debug CONFIG+=release "QMAKE_APPLE_DEVICE_ARCHS=${{ matrix.mac_arch }}"
         else
-          qmake ../DrCOM_JLU_Qt.pro CONFIG+=release
+          qmake ../DrCOM_JLU_Qt.pro CONFIG-=debug CONFIG+=release
         fi
 
-    - name: Build
+    - name: Build for MinGW and others
+      if: matrix.compiler != 'msvc'
       shell: bash
       working-directory: ${{ matrix.build_dir }}
       run: |
-        if [ "${{ matrix.compiler }}" == "msvc" ]; then
-          # MSVC 构建必须在 cmd 环境中运行
-          echo "正在使用 MSVC 构建..."
-          
-          # 检查链接器
-          echo "链接器路径:"
-          which link || echo "link 命令不存在"
-          
-          # 设置 MSVC 工具链路径
-          export PATH="/c/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64:$PATH"
-          export PATH="/c/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64:$PATH"
-          
-          # 使用 cmd 调用 nmake
-          cmd /c "nmake"
-        elif [ "${{ runner.os }}" == "Windows" ] && [ "${{ matrix.compiler }}" == "mingw" ]; then
+        if [ "${{ runner.os }}" == "Windows" ] && [ "${{ matrix.compiler }}" == "mingw" ]; then
           mingw32-make -j$(nproc)
         else
           make -j$(nproc)
         fi
+
+    - name: Build for MSVC
+      if: matrix.compiler == 'msvc'
+      shell: cmd
+      working-directory: ${{ matrix.build_dir }}
+      run: |
+        nmake
 
     - name: Verify Build Output
       shell: bash
@@ -163,20 +157,32 @@ jobs:
             exit 1
           fi
         elif [ "${{ matrix.is_windows }}" == "true" ]; then
-          # Windows 构建输出可能在 release 子目录
+          echo "=== Windows 构建输出详情 ==="
+          echo "构建目录: ${{ matrix.build_dir }}"
+          ls -la "${{ matrix.build_dir }}/"
+          echo "release 子目录:"
+          ls -la "${{ matrix.build_dir }}/release/" 2>/dev/null || echo "无 release 目录"
+          echo "debug 子目录:"
+          ls -la "${{ matrix.build_dir }}/debug/" 2>/dev/null || echo "无 debug 目录"
+          
+          # 查找可执行文件
           if [ -f "${{ matrix.build_dir }}/release/DrCOM_JLU_Qt.exe" ]; then
             echo "✅ 找到 Windows 可执行文件 (在 release 目录)"
-            ls -la "${{ matrix.build_dir }}/release/"
+            ls -la "${{ matrix.build_dir }}/release/DrCOM_JLU_Qt.exe"
+          elif [ -f "${{ matrix.build_dir }}/debug/DrCOM_JLU_Qt.exe" ]; then
+            echo "⚠️ 找到 Windows 可执行文件 (在 debug 目录，但构建类型为 release)"
+            ls -la "${{ matrix.build_dir }}/debug/DrCOM_JLU_Qt.exe"
           elif [ -f "${{ matrix.build_dir }}/DrCOM_JLU_Qt.exe" ]; then
             echo "✅ 找到 Windows 可执行文件"
+            ls -la "${{ matrix.build_dir }}/DrCOM_JLU_Qt.exe"
           else
             echo "❌ 未找到 DrCOM_JLU_Qt.exe"
+            echo "开始搜索..."
             find "${{ matrix.build_dir }}" -name "*.exe" -type f
             exit 1
           fi
         fi
 
-    # 🔥 新增：Windows 依赖部署
     - name: Deploy Windows Dependencies
       if: matrix.is_windows
       shell: bash
@@ -191,10 +197,11 @@ jobs:
         EXE_PATH=""
         if [ -f "${{ matrix.build_dir }}/release/DrCOM_JLU_Qt.exe" ]; then
           EXE_PATH="${{ matrix.build_dir }}/release/DrCOM_JLU_Qt.exe"
+        elif [ -f "${{ matrix.build_dir }}/debug/DrCOM_JLU_Qt.exe" ]; then
+          EXE_PATH="${{ matrix.build_dir }}/debug/DrCOM_JLU_Qt.exe"
         elif [ -f "${{ matrix.build_dir }}/DrCOM_JLU_Qt.exe" ]; then
           EXE_PATH="${{ matrix.build_dir }}/DrCOM_JLU_Qt.exe"
         else
-          # 尝试查找
           EXE_PATH=$(find "${{ matrix.build_dir }}" -name "*.exe" -type f | head -1)
         fi
         

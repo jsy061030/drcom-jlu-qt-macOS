@@ -11,7 +11,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-20.04
+          - os: ubuntu-22.04
             qt_arch: gcc_64
             platform_name: Linux-x64
             arch_label: x86_64

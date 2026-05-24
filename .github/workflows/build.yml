@@ -1,0 +1,120 @@
+name: Qt Cross Platform Build (Win-MinGW/MSVC, macOS-Intel-ARM)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            qt_arch: gcc_64
+            platform_name: Linux-x64
+
+          # Windows MinGW
+          - os: windows-latest
+            qt_arch: win64_mingw
+            compiler: mingw
+            platform_name: Windows-MinGW
+
+          # Windows MSVC
+          - os: windows-latest
+            qt_arch: win64_msvc2022_64
+            compiler: msvc
+            platform_name: Windows-MSVC
+
+          # macOS Intel (明确指定 Intel runner，编译 x86_64 效率更高)
+          - os: macos-13
+            qt_arch: clang_64
+            mac_arch: x86_64
+            platform_name: macOS-Intel
+
+          # macOS Apple Silicon (当前最新 ARM runner)
+          - os: macos-latest
+            qt_arch: clang_64
+            mac_arch: arm64
+            platform_name: macOS-AppleSilicon
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '6.5.3'
+        arch: ${{ matrix.qt_arch }}
+        host: ${{ matrix.os == 'macos-13' && 'mac' || matrix.os == 'macos-latest' && 'mac' || matrix.os == 'windows-latest' && 'windows' || 'linux' }}
+
+    # Windows MinGW 需要安装 MSYS2
+    - name: Setup MSYS2 for MinGW
+      if: matrix.compiler == 'mingw'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        install: mingw-w64-x86_64-make
+        update: true
+
+    - name: Setup MSVC Environment
+      if: matrix.compiler == 'msvc'
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Configure (qmake)
+      shell: bash
+      run: |
+        if [ -n "${{ matrix.mac_arch }}" ]; then
+          # 修复：添加引号确保多架构时也能正确解析
+          qmake DrCOM_JLU_Qt.pro CONFIG+=release "QMAKE_APPLE_DEVICE_ARCHS=${{ matrix.mac_arch }}"
+        else
+          qmake DrCOM_JLU_Qt.pro CONFIG+=release
+        fi
+
+    - name: Build
+      shell: bash
+      run: |
+        if [ "${{ matrix.compiler }}" == "msvc" ]; then
+          nmake
+        elif [ "${{ runner.os }}" == "Windows" ] && [ "${{ matrix.compiler }}" == "mingw" ]; then
+          # 在 MSYS2 环境中使用 mingw32-make
+          mingw32-make -j$(nproc)
+        else
+          make -j$(nproc)
+        fi
+
+    # ---------- 打包步骤 ----------
+    - name: Package Windows
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        7z a DrCOM-JLU-${{ matrix.platform_name }}.zip release/*.exe
+
+    - name: Package macOS
+      if: runner.os == 'macOS' || runner.os == 'macos'
+      run: |
+        # 验证二进制架构
+        file release/DrCOM_JLU_Qt.app/Contents/MacOS/DrCOM_JLU_Qt
+        
+        # 处理依赖
+        macdeployqt release/DrCOM_JLU_Qt.app -always-overwrite
+        
+        # 打包
+        ditto -c -k --keepParent release/DrCOM_JLU_Qt.app DrCOM-JLU-${{ matrix.platform_name }}.zip
+
+    - name: Package Linux
+      if: runner.os == 'Linux'
+      run: |
+        # 验证是否为 x86_64
+        file release/DrCOM_JLU_Qt
+        tar czvf DrCOM-JLU-Linux.tar.gz -C release .
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: DrCOM-JLU-${{ matrix.platform_name }}
+        path: |
+          *.zip
+          *.tar.gz

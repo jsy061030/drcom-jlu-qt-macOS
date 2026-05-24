@@ -11,14 +11,16 @@ jobs:
     strategy:
       matrix:
         include:
+          # Linux x86_64 - 使用 ubuntu-22.04
           - os: ubuntu-22.04
             qt_arch: gcc_64
             platform_name: Linux-x64
             arch_label: x86_64
             build_dir: build-linux-x64
-            artifact_name: DrCOM-JLU-Linux-x86_64.AppImage
+            artifact_name: DrCOM-JLU-Linux-x64.tar.gz
             is_linux: true
 
+          # Windows MinGW
           - os: windows-latest
             qt_arch: win64_mingw
             compiler: mingw
@@ -29,6 +31,7 @@ jobs:
             is_windows: true
             deploy_dir: deploy-windows-mingw
 
+          # Windows MSVC
           - os: windows-latest
             qt_arch: win64_msvc2019_64
             compiler: msvc
@@ -39,6 +42,7 @@ jobs:
             is_windows: true
             deploy_dir: deploy-windows-msvc
 
+          # macOS Apple Silicon
           - os: macos-latest
             qt_arch: clang_64
             mac_arch: arm64
@@ -129,6 +133,8 @@ jobs:
           if [ -f "${{ matrix.build_dir }}/DrCOM_JLU_Qt" ]; then
             file "${{ matrix.build_dir }}/DrCOM_JLU_Qt"
             echo "找到 Linux 可执行文件"
+            echo "检查依赖:"
+            ldd "${{ matrix.build_dir }}/DrCOM_JLU_Qt" 2>/dev/null || echo "ldd 检查失败"
           else
             echo "未找到 DrCOM_JLU_Qt"
             exit 1
@@ -212,81 +218,28 @@ jobs:
           exit 1
         fi
 
-    - name: Prepare for Linux AppImage Creation
+    - name: Package Linux
       if: matrix.is_linux
       shell: bash
       run: |
-        echo "准备 AppImage 创建"
+        echo "=== 打包 Linux 构建目录 ==="
         
-        mkdir -p AppDir/usr/bin
-        mkdir -p AppDir/usr/lib
-        mkdir -p AppDir/usr/share/applications
-        
-        cp "${{ matrix.build_dir }}/DrCOM_JLU_Qt" AppDir/usr/bin/
-        chmod +x AppDir/usr/bin/DrCOM_JLU_Qt
-        
-        echo "[Desktop Entry]" > AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
-        echo "Type=Application" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
-        echo "Name=DrCOM JLU Qt" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
-        echo "Comment=DrCOM Client for Jilin University" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
-        echo "Exec=DrCOM_JLU_Qt" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
-        echo "Terminal=false" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
-        echo "Categories=Network;" >> AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop
-        
-        echo "#!/bin/bash" > AppDir/AppRun
-        echo 'HERE="$(dirname "$(readlink -f "${0}")")"' >> AppDir/AppRun
-        echo 'cd "$HERE"' >> AppDir/AppRun
-        echo 'exec ./usr/bin/DrCOM_JLU_Qt "$@"' >> AppDir/AppRun
-        chmod +x AppDir/AppRun
-
-    - name: Create Linux AppImage
-      if: matrix.is_linux
-      shell: bash
-      run: |
-        echo "创建 Linux AppImage"
-        
-        wget -c -nv "https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage"
-        chmod a+x linuxdeployqt-continuous-x86_64.AppImage
-        
-        export PATH="/usr/local/Qt/6.5.3/gcc_64/bin:$PATH"
-        export QMAKE="/usr/local/Qt/6.5.3/gcc_64/bin/qmake"
-        
-        echo "运行 linuxdeployqt..."
-        ./linuxdeployqt-continuous-x86_64.AppImage AppDir/usr/share/applications/DrCOM_JLU_Qt.desktop \
-          -qmake=$QMAKE \
-          -verbose=2 \
-          -appimage
-        
-        if [ -f "DrCOM-JLU-Linux-x86_64.AppImage" ]; then
-          echo "AppImage 创建成功"
-          file "DrCOM-JLU-Linux-x86_64.AppImage"
-          chmod +x "DrCOM-JLU-Linux-x86_64.AppImage"
+        if [ -f "${{ matrix.build_dir }}/DrCOM_JLU_Qt" ]; then
+          echo "创建发布包: ${{ matrix.artifact_name }}"
+          echo "打包内容:"
+          ls -la "${{ matrix.build_dir }}/"
+          
+          # 创建包含可执行文件的简单目录结构
+          mkdir -p release-linux
+          cp -r "${{ matrix.build_dir }}"/* release-linux/ 2>/dev/null || true
+          
+          # 打包整个目录
+          tar czvf "${{ matrix.artifact_name }}" -C release-linux .
+          
+          echo "✅ 打包完成"
+          ls -lh "${{ matrix.artifact_name }}"
         else
-          echo "AppImage 创建失败，尝试备用方案"
-          
-          wget -c -nv "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
-          chmod a+x appimagetool-x86_64.AppImage
-          
-          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir "DrCOM-JLU-Linux-x86_64.AppImage"
-          
-          if [ -f "DrCOM-JLU-Linux-x86_64.AppImage" ]; then
-            echo "通过备用方案创建 AppImage 成功"
-            file "DrCOM-JLU-Linux-x86_64.AppImage"
-            chmod +x "DrCOM-JLU-Linux-x86_64.AppImage"
-          else
-            echo "AppImage 创建失败"
-            exit 1
-          fi
-        fi
-
-    - name: Package Linux AppImage
-      if: matrix.is_linux
-      shell: bash
-      run: |
-        if [ -f "DrCOM-JLU-Linux-x86_64.AppImage" ]; then
-          mv "DrCOM-JLU-Linux-x86_64.AppImage" "${{ matrix.artifact_name }}"
-        else
-          echo "AppImage 文件未找到"
+          echo "❌ 未找到 Linux 可执行文件"
           exit 1
         fi
 
@@ -294,10 +247,16 @@ jobs:
       if: matrix.is_windows
       shell: bash
       run: |
+        echo "=== 打包 Windows 部署目录 ==="
+        
         if [ -d "${{ matrix.deploy_dir }}" ]; then
+          echo "创建 Windows 发布包: ${{ matrix.artifact_name }}"
           7z a "${{ matrix.artifact_name }}" "${{ matrix.deploy_dir }}/*"
+          
+          echo "✅ 打包完成"
+          ls -lh "${{ matrix.artifact_name }}"
         else
-          echo "部署目录不存在"
+          echo "❌ 部署目录不存在"
           exit 1
         fi
 
@@ -305,6 +264,8 @@ jobs:
       if: matrix.is_macos
       shell: bash
       run: |
+        echo "=== 打包 macOS 应用包 ==="
+        
         if [ -d "${{ matrix.build_dir }}/DrCOM_JLU_Qt.app" ]; then
           APP_PATH="${{ matrix.build_dir }}/DrCOM_JLU_Qt.app"
         else
@@ -312,9 +273,13 @@ jobs:
         fi
         
         if [ -d "$APP_PATH" ]; then
+          echo "创建 macOS 发布包: ${{ matrix.artifact_name }}"
           ditto -c -k --keepParent "$APP_PATH" "${{ matrix.artifact_name }}"
+          
+          echo "✅ 打包完成"
+          ls -lh "${{ matrix.artifact_name }}"
         else
-          echo "未找到应用包"
+          echo "❌ 未找到应用包"
           exit 1
         fi
 

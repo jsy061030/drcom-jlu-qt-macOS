@@ -4,6 +4,9 @@ drcom for jlu in qt cross platform
 - 需要新版本，可以自己到Actions里手动触发build workflow，十分钟后到release里找编译结果，是以时间戳为标记的。
 - build workflow产生的linux版本是基于ubuntu22.04编译的单一二进制文件，没有附带运行库，请在系统里安装qt 6.5.3+ 运行环境。
 
+跨平台 **win linux** [下载链接](https://github.com/code4lala/drcom-jlu-qt/releases)
+**macOS** [下载链接](https://github.com/jsy061030/drcom-jlu-qt-macOS/releases)
+
 # 功能对比
 | 功能                 | 官方 | 本版 | 说明                                                             |
 |----------------------|------|------|------------------------------------------------------------------|

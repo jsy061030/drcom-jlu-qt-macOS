@@ -1,4 +1,4 @@
-# drcom-jlu-qt-jsy-fork
+# drcom-jlu-qt
 drcom for jlu in qt cross platform
 
 - 需要新版本，可以自己到Actions里手动触发build workflow，十分钟后到release里找编译结果，是以时间戳为标记的。
@@ -66,9 +66,6 @@ drcom for jlu in qt cross platform
 
 **唯一实例**
 > [https://github.com/itay-grudev/SingleApplication](https://github.com/itay-grudev/SingleApplication)
-
-**本项目母项目**
-> [https://github.com/code4lala/drcom-jlu-qt]
 
 # 特别感谢
 **登录部分复制了jlu部分代码**
